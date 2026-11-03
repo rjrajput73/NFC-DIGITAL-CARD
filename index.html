@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NFC Digital Card</title>
+<style>
+:root{--blue:#1a73e8;--blue-d:#1557b0;--bg:#f4f8ff;--line:#d6e4fb;--tx:#1f2a44;--mut:#5f6f8c;--red:#d93025;--ok:#188038}
+*{box-sizing:border-box}
+body{margin:0;font-family:"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--tx);line-height:1.5}
+.wrap{max-width:560px;margin:0 auto;padding:16px}
+.top{background:#fff;border-bottom:1px solid var(--line);padding:12px 16px;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;z-index:5}
+.top b{color:var(--blue);font-size:18px}
+.card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;margin:12px 0}
+h2{margin:0 0 10px;font-size:18px}h3{margin:0 0 8px;font-size:15px}
+label{display:block;font-size:13px;color:var(--mut);margin:10px 0 4px}
+input,textarea{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font:inherit;background:#fff}
+input:focus,textarea:focus{outline:2px solid var(--blue);border-color:var(--blue)}
+textarea{min-height:80px;resize:vertical}
+button,.btn{display:inline-block;background:var(--blue);color:#fff;border:0;border-radius:10px;padding:11px 16px;font:inherit;font-weight:600;cursor:pointer;text-decoration:none;text-align:center}
+button:hover,.btn:hover{background:var(--blue-d)}
+button.ghost{background:#fff;color:var(--blue);border:1px solid var(--blue)}
+button.red{background:var(--red)}
+button:disabled{opacity:.5;cursor:not-allowed}
+.full{width:100%;margin-top:14px}
+.tabs{display:flex;gap:8px}.tabs button{flex:1}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.item{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:12px;border:1px solid var(--line);border-radius:12px;margin:8px 0;cursor:pointer;background:#fff}
+.item:hover{background:var(--bg)}
+.chip{font-size:12px;padding:2px 8px;border-radius:20px;background:#e8f0fe;color:var(--blue)}
+.chip.r{background:#fce8e6;color:var(--red)}.chip.g{background:#e6f4ea;color:var(--ok)}
+.mut{color:var(--mut);font-size:13px}
+.msg{padding:10px 12px;border-radius:10px;margin-top:12px;font-size:14px;background:#e8f0fe}
+.msg.err{background:#fce8e6;color:var(--red)}.msg.ok{background:#e6f4ea;color:var(--ok)}
+.pub{text-align:center}
+.pub .ph{width:104px;height:104px;border-radius:50%;object-fit:cover;border:3px solid var(--line);background:#e8f0fe}
+.pub h1{margin:10px 0 4px;font-size:24px}
+.link{display:block;margin:10px 0;padding:14px;border:1px solid var(--line);border-radius:12px;background:#fff;color:var(--tx);text-decoration:none;font-weight:600}
+.link.off{color:var(--mut);font-weight:400;background:#f1f3f4}
+.stars{font-size:34px;letter-spacing:4px;text-decoration:none;color:#f9ab00;display:block;margin:10px 0}
+.qr{max-width:200px;width:100%;margin:8px auto;display:block}
+.log{font-size:13px;border-bottom:1px solid var(--line);padding:6px 0;word-break:break-word}
+.imgprev{width:72px;height:72px;object-fit:cover;border-radius:10px;border:1px solid var(--line);display:block;margin-top:6px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+// ====== YAHAN APNI SUPABASE DETAILS PASTE KARO ======
+const SUPABASE_URL = 'https://tnmlivrnmneazpxywudk.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_gfKnXxP72wSU8GumO2-qtw_80-0rmA9';
+// ====================================================
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const app = document.getElementById('app');
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const safeUrl = u => { u = (u || '').trim(); return /^https?:\/\//i.test(u) ? u : ''; };
+const waUrl = u => { u = (u || '').trim(); if (/^\+?\d[\d\s-]{7,}$/.test(u)) return 'https://wa.me/' + u.replace(/\D/g, ''); return safeUrl(u); };
+const FIELDS = [['shop_name','Shop name','text'],['description','About the shop','area'],['address','Address','area'],['phone','Contact number','text'],['whatsapp','WhatsApp chat link','text'],['instagram','Instagram link','text'],['facebook','Facebook link','text'],['google_review','Google Review link','text']];
+const pubLink = id => location.origin + location.pathname.replace(/\/shop\/\d+$/, '/') + '?shop=' + id;
+
+function msg(box, text, kind) { $(box).innerHTML = text ? `<div class="msg ${kind || ''}">${esc(text)}</div>` : ''; }
+function shell(inner, right) {
+  app.innerHTML = `<div class="top"><b>NFC Digital Card</b><span>${right || ''}</span></div><div class="wrap">${inner}</div>`;
+}
+async function logout() { await sb.auth.signOut(); location.href = location.pathname; }
+
+// ---------- ROUTER ----------
+async function start() {
+  const m = location.pathname.match(/\/shop\/(\d+)\/?$/);
+  const q = new URLSearchParams(location.search).get('shop');
+  const id = m ? m[1] : q;
+  if (id) return publicPage(Number(id));
+  const { data: { session } } = await sb.auth.getSession();
+  if (!session) return authPage();
+  const { data: isAdmin } = await sb.rpc('is_admin');
+  if (isAdmin) return adminPage();
+  const { data: shop } = await sb.from('shops').select('*').eq('user_id', session.user.id).maybeSingle();
+  if (!shop) { shell('<div class="card">Account not found.</div>', '<button class="ghost" onclick="logout()">Logout</button>'); return; }
+  ownerPage(shop);
+}
+
+// ---------- PUBLIC PROFILE (read only) ----------
+async function publicPage(id) {
+  const { data } = await sb.rpc('get_public_shop', { p_id: id });
+  const s = data && data[0];
+  if (!s) { shell('<div class="card pub"><h2>User not found</h2></div>'); return; }
+  const wa = waUrl(s.whatsapp), ig = safeUrl(s.instagram), fb = safeUrl(s.facebook), gr = safeUrl(s.google_review);
+  const btn = (u, t) => u ? `<a class="link" href="${esc(u)}" target="_blank" rel="noopener">${t}</a>` : `<div class="link off">${t}: User not found</div>`;
+  shell(`<div class="card pub">
+    ${s.photo_url ? `<img class="ph" src="${esc(s.photo_url)}" alt="">` : ''}
+    <h1>${esc(s.shop_name) || 'Shop'}</h1>
+    <div class="mut" style="white-space:pre-line">${esc(s.description)}</div>
+    ${s.address ? `<p style="white-space:pre-line">📍 ${esc(s.address)}</p>` : ''}
+    ${gr ? `<a class="stars" href="${esc(gr)}" target="_blank" rel="noopener" aria-label="Google Review">★★★★★</a><div class="mut">Rate us on Google</div>` : '<div class="link off">Google Review: User not found</div>'}
+    ${s.phone ? `<a class="link" href="tel:${esc(s.phone)}">📞 ${esc(s.phone)}</a>` : ''}
+    ${btn(wa, 'WhatsApp')}${btn(ig, 'Instagram')}${btn(fb, 'Facebook')}
+    ${s.qr_url ? `<img class="qr" src="${esc(s.qr_url)}" alt="QR">` : ''}
+  </div>`);
+}
+
+// ---------- LOGIN / SIGNUP ----------
+function authPage(tab) {
+  tab = tab || 'login';
+  shell(`<div class="card">
+    <div class="tabs"><button class="${tab === 'login' ? '' : 'ghost'}" id="tl">Login</button><button class="${tab === 'signup' ? '' : 'ghost'}" id="ts">Create Account</button></div>
+    ${tab === 'login' ? `
+      <label>Username</label><input id="u" autocapitalize="none" autocomplete="username">
+      <label>Password</label><input id="p" type="password" autocomplete="current-password">
+      <button class="full" id="go">Login</button>
+      <p style="text-align:center"><a href="#" id="fg">Forgot password?</a></p>` : `
+      <label>Shop name</label><input id="sn">
+      <label>Gmail</label><input id="em" type="email" autocapitalize="none">
+      <label>Username</label><input id="u" autocapitalize="none">
+      <label>Password (min 6)</label><input id="p" type="password" autocomplete="new-password">
+      <button class="full" id="go">Create Account</button>`}
+    <div id="m"></div></div>`);
+  $('#tl').onclick = () => authPage('login'); $('#ts').onclick = () => authPage('signup');
+  if (tab === 'login') { $('#fg').onclick = e => { e.preventDefault(); forgotPage(); }; $('#go').onclick = doLogin; }
+  else $('#go').onclick = doSignup;
+}
+async function doLogin() {
+  const u = $('#u').value.trim().toLowerCase(), p = $('#p').value;
+  if (!u || !p) return msg('#m', 'Enter username and password.', 'err');
+  $('#go').disabled = true;
+  let email = u;
+  if (!u.includes('@')) { const r = await sb.rpc('login_email', { p_username: u }); email = r.data; }
+  if (email) {
+    const { error } = await sb.auth.signInWithPassword({ email, password: p });
+    if (!error) { await sb.rpc('record_ok', { p_username: u }); return start(); }
+    if (!u.includes('@')) await sb.rpc('record_fail', { p_username: u });
+  }
+  $('#go').disabled = false;
+  msg('#m', 'Wrong username or password. Try again.', 'err');
+}
+async function doSignup() {
+  const sn = $('#sn').value.trim(), em = $('#em').value.trim().toLowerCase(), u = $('#u').value.trim().toLowerCase(), p = $('#p').value;
+  if (!sn || !em || !u || p.length < 6) return msg('#m', 'Fill every field. Password needs 6+ characters.', 'err');
+  if (!/^[a-z0-9_]{3,20}$/.test(u)) return msg('#m', 'Username: 3-20 letters, numbers or _ only.', 'err');
+  $('#go').disabled = true;
+  const { data, error } = await sb.auth.signUp({ email: em, password: p, options: { data: { username: u, shop_name: sn } } });
+  if (error || !data.session) { $('#go').disabled = false; return msg('#m', 'Could not create account. Username or Gmail may already be used.', 'err'); }
+  start();
+}
+function forgotPage() {
+  shell(`<div class="card"><h2>Reset password</h2>
+    <label>Your Gmail</label><input id="em" type="email" autocapitalize="none">
+    <button class="full" id="send">Send code</button><div id="m"></div>
+    <div id="step2" style="display:none">
+      <label>Code from email</label><input id="code" inputmode="numeric">
+      <label>New password (min 6)</label><input id="np" type="password">
+      <button class="full" id="ok">Set new password</button></div>
+    <p style="text-align:center"><a href="#" id="bk">Back to login</a></p></div>`);
+  $('#bk').onclick = e => { e.preventDefault(); authPage(); };
+  $('#send').onclick = async () => {
+    const em = $('#em').value.trim().toLowerCase();
+    const { error } = await sb.auth.signInWithOtp({ email: em, options: { shouldCreateUser: false } });
+    if (error) return msg('#m', 'Could not send code. Check the Gmail and try again later.', 'err');
+    msg('#m', 'Code sent. Check your email.', 'ok'); $('#step2').style.display = 'block';
+  };
+  $('#ok').onclick = async () => {
+    const em = $('#em').value.trim().toLowerCase(), t = $('#code').value.trim(), np = $('#np').value;
+    if (np.length < 6) return msg('#m', 'Password needs 6+ characters.', 'err');
+    const v = await sb.auth.verifyOtp({ email: em, token: t, type: 'email' });
+    if (v.error) return msg('#m', 'Wrong or expired code.', 'err');
+    const u = await sb.auth.updateUser({ password: np });
+    if (u.error) return msg('#m', 'Could not set password.', 'err');
+    start();
+  };
+}
+
+// ---------- SHOP EDITOR (used by owner and admin) ----------
+function editor(shop, isAdmin, onDone) {
+  const locked = shop.locked && !isAdmin;
+  const f = FIELDS.map(([k, l, t]) => `<label>${l}</label>` + (t === 'area' ? `<textarea id="f_${k}" ${locked ? 'disabled' : ''}>${esc(shop[k])}</textarea>` : `<input id="f_${k}" value="${esc(shop[k])}" ${locked ? 'disabled' : ''}>`)).join('');
+  return `<div class="card"><h2>${isAdmin ? 'Shop #' + shop.id + ' — ' + esc(shop.username) : 'My shop'}</h2>
+    ${locked ? '<div class="msg err">Your profile is locked. Contact the admin to make changes.</div>' : ''}
+    ${f}
+    <label>Profile photo</label>${shop.photo_url ? `<img class="imgprev" src="${esc(shop.photo_url)}">` : ''}<input type="file" id="ph" accept="image/*" ${locked ? 'disabled' : ''}>
+    <label>QR code image</label>${shop.qr_url ? `<img class="imgprev" src="${esc(shop.qr_url)}">` : ''}<input type="file" id="qr" accept="image/*" ${locked ? 'disabled' : ''}>
+    <button class="full" id="save" ${locked ? 'disabled' : ''}>Save changes</button><div id="em"></div></div>
+    <div class="card"><h3>Your NFC link (write this on the chip)</h3>
+    <input id="pl" readonly value="${esc(pubLink(shop.id))}">
+    <div class="row"><button class="ghost" id="cp">Copy link</button><a class="btn ghost" style="background:#fff;color:var(--blue);border:1px solid var(--blue)" href="${esc(pubLink(shop.id))}" target="_blank">Open public page</a></div></div>`;
+}
+function wireEditor(shop, isAdmin, done) {
+  $('#cp').onclick = () => { $('#pl').select(); navigator.clipboard && navigator.clipboard.writeText($('#pl').value); msg('#em', 'Link copied.', 'ok'); };
+  const sv = $('#save'); if (!sv) return;
+  sv.onclick = async () => {
+    sv.disabled = true; const upd = {};
+    FIELDS.forEach(([k]) => upd[k] = $('#f_' + k).value.trim());
+    try {
+      for (const [inp, col] of [['ph', 'photo_url'], ['qr', 'qr_url']]) {
+        const file = $('#' + inp).files[0]; if (!file) continue;
+        if (file.size > 3e6) throw new Error('Image must be under 3 MB.');
+        const path = shop.id + '/' + inp + '_' + Date.now() + '.' + (file.name.split('.').pop() || 'jpg');
+        const up = await sb.storage.from('shop-images').upload(path, file, { upsert: true });
+        if (up.error) throw new Error('Image upload failed.');
+        upd[col] = sb.storage.from('shop-images').getPublicUrl(path).data.publicUrl;
+      }
+      const { error } = await sb.from('shops').update(upd).eq('id', shop.id);
+      if (error) throw new Error('Could not save. Profile may be locked.');
+      msg('#em', 'Saved.', 'ok'); setTimeout(done, 700);
+    } catch (e) { sv.disabled = false; msg('#em', e.message, 'err'); }
+  };
+}
+
+// ---------- OWNER ----------
+async function ownerPage(shop) {
+  shell(editor(shop, false), '<button class="ghost" onclick="logout()">Logout</button>');
+  wireEditor(shop, false, async () => {
+    const { data } = await sb.from('shops').select('*').eq('id', shop.id).single(); ownerPage(data);
+  });
+}
+
+// ---------- ADMIN ----------
+async function adminPage() {
+  const [{ data: shops }, { data: locks }] = await Promise.all([
+    sb.from('shops').select('*').order('id'), sb.rpc('admin_locks')]);
+  const list = (shops || []).map(s => `<div class="item" data-id="${s.id}"><div><b>#${s.id} ${esc(s.shop_name) || '(no name)'}</b><div class="mut">${esc(s.username)} · ${new Date(s.created_at).toLocaleDateString()}</div></div>
+    <div>${s.published ? '<span class="chip g">Live</span>' : '<span class="chip">Hidden</span>'} ${s.locked ? '<span class="chip r">Locked</span>' : ''}</div></div>`).join('') || '<div class="mut">No shop owners yet.</div>';
+  const lk = (locks || []).map(l => `<div class="log">🔒 ${esc(l.username)} — locked until ${new Date(l.locked_until).toLocaleTimeString()}</div>`).join('');
+  shell(`<div class="card"><h2>Add shop owner</h2>
+    <label>Shop name</label><input id="n_sn"><label>Gmail</label><input id="n_em" type="email" autocapitalize="none">
+    <label>Username</label><input id="n_u" autocapitalize="none"><label>Password (min 6)</label><input id="n_p">
+    <button class="full" id="n_go">Create shop owner</button><div id="nm"></div></div>
+    ${lk ? `<div class="card"><h3>Temporarily locked logins</h3>${lk}</div>` : ''}
+    <div class="card"><h2>All shop owners (${(shops || []).length})</h2>${list}</div>`,
+    '<button class="ghost" onclick="logout()">Logout</button>');
+  document.querySelectorAll('.item').forEach(el => el.onclick = () => adminShop(Number(el.dataset.id)));
+  $('#n_go').onclick = async () => {
+    const sn = $('#n_sn').value.trim(), em = $('#n_em').value.trim().toLowerCase(), u = $('#n_u').value.trim().toLowerCase(), p = $('#n_p').value;
+    if (!sn || !em || !/^[a-z0-9_]{3,20}$/.test(u) || p.length < 6) return msg('#nm', 'Fill all fields. Username: letters, numbers, _ (3-20). Password 6+.', 'err');
+    const tmp = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+    const { error } = await tmp.auth.signUp({ email: em, password: p, options: { data: { username: u, shop_name: sn } } });
+    if (error) return msg('#nm', 'Could not create. Username or Gmail may already exist.', 'err');
+    adminPage();
+  };
+}
+async function adminShop(id) {
+  const [{ data: s }, { data: logs }] = await Promise.all([
+    sb.from('shops').select('*').eq('id', id).single(),
+    sb.from('change_log').select('*').eq('shop_id', id).order('created_at', { ascending: false }).limit(60)]);
+  const lg = (logs || []).map(l => `<div class="log"><b>${esc(l.field)}</b> (${esc(l.by_role)}) · ${new Date(l.created_at).toLocaleString()}<br>${esc(l.old_value) || '—'} → ${esc(l.new_value) || '—'}</div>`).join('') || '<div class="mut">No changes yet.</div>';
+  shell(`<button class="ghost" id="bk">← All shop owners</button>
+    <div class="card"><div class="mut">Gmail: ${esc(s.email)} · Created: ${new Date(s.created_at).toLocaleString()}</div>
+    <div class="row"><button id="tp" class="${s.published ? 'ghost' : ''}">${s.published ? 'Unpublish' : 'Publish'}</button>
+    <button id="tl" class="${s.locked ? '' : 'ghost'}">${s.locked ? 'Unlock' : 'Lock'}</button>
+    <button id="dl" class="red">Delete</button></div><div id="am"></div></div>
+    ${editor(s, true)}
+    <div class="card"><h3>Change history</h3>${lg}</div>`,
+    '<button class="ghost" onclick="logout()">Logout</button>');
+  $('#bk').onclick = adminPage;
+  wireEditor(s, true, () => adminShop(id));
+  $('#tp').onclick = async () => { await sb.from('shops').update({ published: !s.published }).eq('id', id); adminShop(id); };
+  $('#tl').onclick = async () => { await sb.from('shops').update({ locked: !s.locked }).eq('id', id); adminShop(id); };
+  $('#dl').onclick = async () => {
+    if (!confirm('Delete this shop permanently?')) return;
+    const { error } = await sb.from('shops').delete().eq('id', id);
+    if (error) return msg('#am', 'Delete failed.', 'err');
+    adminPage();
+  };
+}
+
+start();
+</script>
+</body>
+</html>
